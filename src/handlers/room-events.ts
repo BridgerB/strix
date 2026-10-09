@@ -1448,8 +1448,10 @@ export const postRedact =
 		room.forward_extremities = [eventId];
 
 		// Apply the redaction to the target only when we actually hold it locally.
+		// Pass the room version so version-specific redaction rules apply (e.g.
+		// MSC3389 preserving m.relates_to for org.matrix.msc3389.* rooms).
 		if (targetIsLocal) {
-			const redacted = redactEvent(targetEntry!.event);
+			const redacted = redactEvent(targetEntry!.event, room.room_version);
 			redacted.unsigned = {
 				...redacted.unsigned,
 				redacted_because: pduToClientEvent(event, eventId),
