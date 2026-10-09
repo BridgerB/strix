@@ -7,6 +7,7 @@ import {
 import type { Handler } from "../router.ts";
 import type { Storage } from "../storage/interface.ts";
 import type { RoomAlias, RoomId } from "../types/index.ts";
+import { getAllowedRoomIds } from "./federation/spaces.ts";
 
 export const getRoomSummary =
 	(storage: Storage): Handler =>
@@ -75,6 +76,11 @@ export const getRoomSummary =
 		if (joinRule) body.join_rule = joinRule;
 		if (roomType) body.room_type = roomType;
 		if (membership) body.membership = membership;
+
+		// Restricted (and knock_restricted) rooms advertise the rooms whose
+		// membership grants access (MSC3266 / room_summary_test.go).
+		const allowedRoomIds = getAllowedRoomIds(room);
+		if (allowedRoomIds.length > 0) body.allowed_room_ids = allowedRoomIds;
 
 		return { status: 200, body };
 	};

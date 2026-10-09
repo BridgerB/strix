@@ -3,7 +3,6 @@ import { generateSessionId } from "../crypto.ts";
 import { hashPassword } from "../crypto-utils.ts";
 import {
 	badJson,
-	forbidden,
 	invalidParam,
 	invalidUsername,
 	userInUse,
@@ -43,6 +42,19 @@ export const postRegister =
 
 		const body = req.body as RegisterRequest;
 
+		// Validate the requested username up front — format, then availability — so
+		// an invalid or already-taken username is rejected with 400 *before* the
+		// UIAA dance (Synapse behaviour; TestRegistration). The initial UIAA probe
+		// may legitimately omit the username, so only check when one is present.
+		if (body.username != null && body.username !== "") {
+			const lp = String(body.username).toLowerCase();
+			if (!USERNAME_RE.test(lp))
+				throw invalidUsername(
+					"Username can only contain lowercase letters, digits, and ._=-/",
+				);
+			if (await storage.getUserByLocalpart(lp)) throw userInUse();
+		}
+
 		if (!body.auth) {
 			const sessionId = generateSessionId();
 			await storage.createUIAASession(sessionId);
@@ -54,16 +66,26 @@ export const postRegister =
 			return { status: 401, body: uiaa };
 		}
 
-		// Support single-step registration: if auth is provided without a
-		// session, create one on the fly and complete it immediately
-		let sessionId = body.auth.session;
-		if (!sessionId) {
-			sessionId = generateSessionId();
-			await storage.createUIAASession(sessionId);
+		// A UIAA session is required: auth provided without a session (or with an
+		// unknown one) must be answered with a fresh 401 challenge, not silently
+		// completed — otherwise registration "succeeds" with no real auth step
+		// (TestRegistration "without a session fails").
+		const sessionId = body.auth.session;
+		const uiaaSession = sessionId
+			? await storage.getUIAASession(sessionId)
+			: undefined;
+		if (!sessionId || !uiaaSession) {
+			const newSession = generateSessionId();
+			await storage.createUIAASession(newSession);
+			return {
+				status: 401,
+				body: {
+					flows: REGISTRATION_FLOWS,
+					params: {},
+					session: newSession,
+				},
+			};
 		}
-
-		const uiaaSession = await storage.getUIAASession(sessionId);
-		if (!uiaaSession) throw forbidden("Unknown session");
 
 		if (body.auth.type === "m.login.dummy") {
 			await storage.addUIAACompleted(sessionId, "m.login.dummy");
