@@ -3,6 +3,7 @@ import { generateSessionId } from "../crypto.ts";
 import { hashPassword } from "../crypto-utils.ts";
 import {
 	badJson,
+	forbidden,
 	invalidParam,
 	invalidUsername,
 	userInUse,
@@ -66,26 +67,20 @@ export const postRegister =
 			return { status: 401, body: uiaa };
 		}
 
-		// A UIAA session is required: auth provided without a session (or with an
-		// unknown one) must be answered with a fresh 401 challenge, not silently
-		// completed — otherwise registration "succeeds" with no real auth step
-		// (TestRegistration "without a session fails").
-		const sessionId = body.auth.session;
-		const uiaaSession = sessionId
-			? await storage.getUIAASession(sessionId)
-			: undefined;
-		if (!sessionId || !uiaaSession) {
-			const newSession = generateSessionId();
-			await storage.createUIAASession(newSession);
-			return {
-				status: 401,
-				body: {
-					flows: REGISTRATION_FLOWS,
-					params: {},
-					session: newSession,
-				},
-			};
+		// Support single-step registration: if auth is provided without a session,
+		// create one on the fly and complete it immediately. This matches Synapse's
+		// non-strict behaviour, which Complement's own blueprint (OldDeploy) user
+		// registration depends on — it registers with {auth:{type:dummy}} and no
+		// session and expects 200. (The strict "Registration without a session
+		// fails" sub-test is SkipIf'd on Synapse/Dendrite/Conduit for this reason;
+		// enforcing it would break single-step registration.)
+		let sessionId = body.auth.session;
+		if (!sessionId) {
+			sessionId = generateSessionId();
+			await storage.createUIAASession(sessionId);
 		}
+		const uiaaSession = await storage.getUIAASession(sessionId);
+		if (!uiaaSession) throw forbidden("Unknown session");
 
 		if (body.auth.type === "m.login.dummy") {
 			await storage.addUIAACompleted(sessionId, "m.login.dummy");
