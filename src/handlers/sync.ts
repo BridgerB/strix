@@ -44,12 +44,18 @@ const buildKnockRoom = async (
 		"m.room.member",
 		userId,
 	);
+	// Over federation, MSC4311's `knock_room_state` carries *full* PDUs, so strip
+	// them before handing them to the client (the client-facing `knock_state`
+	// must be stripped state events — no origin_server_ts, auth_events, etc.).
+	// toStripped is a no-op shape-wise on state that is already stripped.
 	const knockRoomState = (
 		memberEvt?.event.unsigned as Record<string, unknown> | undefined
-	)?.knock_room_state as StrippedStateEvent[] | undefined;
+	)?.knock_room_state as
+		| Array<{ content: unknown; sender: string; state_key?: string; type: string }>
+		| undefined;
 	const events: StrippedStateEvent[] =
 		knockRoomState && knockRoomState.length > 0
-			? [...knockRoomState]
+			? knockRoomState.map((e) => toStripped(e))
 			: await storage.getStrippedState(roomId);
 	if (
 		memberEvt &&

@@ -32,6 +32,16 @@ const REGISTRATION_FLOWS: { stages: AuthType[] }[] = [
 const MIN_PASSWORD_LENGTH = 1;
 export const USERNAME_RE = /^[a-z0-9._=\-/]+$/;
 
+// Localparts for which we have handed out a UIA session (the client did the
+// initial no-`auth` probe and got a 401 + session) but have not yet completed
+// registration. Used to enforce the spec's "if the server issued a session you
+// must use it" rule: a subsequent auth attempt that omits the session is then
+// rejected (TestRegistration "Registration without a session fails"), while a
+// single-step register that never probed first (Complement's OldDeploy
+// blueprint) has no pending marker and still completes. Process-local, which
+// matches strix's one-process-per-homeserver deployment.
+const pendingSessionUsernames = new Set<string>();
+
 export const postRegister =
 	(storage: Storage, serverName: string): Handler =>
 	async (req) => {
@@ -59,6 +69,10 @@ export const postRegister =
 		if (!body.auth) {
 			const sessionId = generateSessionId();
 			await storage.createUIAASession(sessionId);
+			// Remember that this username was issued a session, so a later auth
+			// attempt that drops the session is rejected (see pendingSessionUsernames).
+			if (body.username != null && body.username !== "")
+				pendingSessionUsernames.add(String(body.username).toLowerCase());
 			const uiaa: UIAAResponse = {
 				flows: REGISTRATION_FLOWS,
 				params: {},
@@ -76,6 +90,24 @@ export const postRegister =
 		// enforcing it would break single-step registration.)
 		let sessionId = body.auth.session;
 		if (!sessionId) {
+			// Strict UIA: if we already issued a session for this username, the
+			// client must submit it. Dropping the session is rejected with a fresh
+			// 401 challenge (TestRegistration "Registration without a session
+			// fails"). A first-and-only POST with auth (blueprint single-step
+			// registration) has no pending marker, so it falls through and a
+			// session is minted on the fly to complete in one step.
+			const lp =
+				body.username != null ? String(body.username).toLowerCase() : "";
+			if (lp && pendingSessionUsernames.has(lp)) {
+				const challenge = generateSessionId();
+				await storage.createUIAASession(challenge);
+				const uiaa: UIAAResponse = {
+					flows: REGISTRATION_FLOWS,
+					params: {},
+					session: challenge,
+				};
+				return { status: 401, body: uiaa };
+			}
 			sessionId = generateSessionId();
 			await storage.createUIAASession(sessionId);
 		}
@@ -141,6 +173,7 @@ export const postRegister =
 		await getOrInitRules(storage, userId);
 
 		await storage.deleteUIAASession(sessionId);
+		pendingSessionUsernames.delete(localpart);
 
 		if (body.inhibit_login) {
 			return { status: 200, body: { user_id: userId } };
