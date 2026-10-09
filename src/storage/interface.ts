@@ -289,6 +289,21 @@ export interface Storage {
 	/** Stream position at which `userId`'s presence last changed (0 if never). */
 	getPresenceChangedAt(userId: UserId): Promise<number>;
 
+	// Profile updates (MSC4429)
+	/** Record a profile-field change for `userId` (value `null` = cleared). */
+	recordProfileUpdate(
+		userId: UserId,
+		field: string,
+		value: unknown,
+	): Promise<void>;
+	/** Profile-field changes in the stream window (since, until]. */
+	getProfileUpdatesSince(
+		since: number,
+		until: number,
+	): Promise<
+		{ userId: string; field: string; value: unknown; streamPos: number }[]
+	>;
+
 	// Media
 	storeMedia(media: StoredMedia, data: Buffer): Promise<void>;
 	getMedia(

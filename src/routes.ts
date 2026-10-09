@@ -145,6 +145,7 @@ import {
 	getAvatarUrl,
 	getDisplayName,
 	getProfile,
+	deleteProfileField,
 	getProfileField,
 	putAvatarUrl,
 	putDisplayName,
@@ -447,6 +448,11 @@ export const registerRoutes = (
 	router.put(
 		"/_matrix/client/v3/profile/:userId/:keyName",
 		putProfileField(storage, serverName),
+		auth,
+	);
+	router.delete(
+		"/_matrix/client/v3/profile/:userId/:keyName",
+		deleteProfileField(storage, serverName),
 		auth,
 	);
 

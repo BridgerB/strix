@@ -2927,6 +2927,8 @@ export const createSqliteStorage = (dbPath: string): Storage => {
 		getTypingChangedAt: eph.getTypingChangedAt,
 		setPresence: eph.setPresence,
 		getPresenceChangedAt: eph.getPresenceChangedAt,
+		recordProfileUpdate: eph.recordProfileUpdate,
+		getProfileUpdatesSince: eph.getProfileUpdatesSince,
 		getPresence: eph.getPresence,
 	};
 };

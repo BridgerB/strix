@@ -23,6 +23,12 @@ export interface SyncResponse {
 	device_lists?: DeviceLists;
 	device_one_time_keys_count?: Record<string, number>;
 	device_unused_fallback_key_types?: string[];
+	// MSC4429: per-user profile field updates for users sharing a room with the
+	// syncer. `profile_updates` is null when the user left the last shared room.
+	"org.matrix.msc4429.users"?: Record<
+		string,
+		{ profile_updates: Record<string, unknown> | null }
+	>;
 }
 
 export interface SyncRooms {

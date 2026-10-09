@@ -82,6 +82,19 @@ export interface EphemeralStore {
 		  }
 		| undefined
 	>;
+	/** MSC4429: record a profile-field change (value `null` means cleared). */
+	recordProfileUpdate(
+		userId: UserId,
+		field: string,
+		value: unknown,
+	): Promise<void>;
+	/** MSC4429: profile-field changes in the stream window (since, until]. */
+	getProfileUpdatesSince(
+		since: number,
+		until: number,
+	): Promise<
+		{ userId: string; field: string; value: unknown; streamPos: number }[]
+	>;
 }
 
 /**
@@ -110,6 +123,15 @@ export const createEphemeralStore = (): EphemeralStore => {
 	>();
 	// Stream position at which each user's presence last changed.
 	const presenceChangedAt = new Map<UserId, number>();
+
+	// MSC4429: append-only log of profile-field changes, each tagged with a
+	// stream position so incremental /sync can select changes in (since, until].
+	const profileUpdates: {
+		userId: string;
+		field: string;
+		value: unknown;
+		streamPos: number;
+	}[] = [];
 
 	const wakeWaiters = (): void => {
 		for (const waiter of eventWaiters) waiter();
@@ -200,6 +222,18 @@ export const createEphemeralStore = (): EphemeralStore => {
 
 	const getPresence = async (userId: UserId) => presenceMap.get(userId);
 
+	const recordProfileUpdate = async (
+		userId: UserId,
+		field: string,
+		value: unknown,
+	): Promise<void> => {
+		profileUpdates.push({ userId, field, value, streamPos: ++streamCounter });
+		wakeWaiters();
+	};
+
+	const getProfileUpdatesSince = async (since: number, until: number) =>
+		profileUpdates.filter((u) => u.streamPos > since && u.streamPos <= until);
+
 	return {
 		get streamCounter() {
 			return streamCounter;
@@ -223,5 +257,7 @@ export const createEphemeralStore = (): EphemeralStore => {
 		setPresence,
 		getPresenceChangedAt,
 		getPresence,
+		recordProfileUpdate,
+		getProfileUpdatesSince,
 	};
 };

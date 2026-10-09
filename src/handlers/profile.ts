@@ -212,6 +212,11 @@ export const putDisplayName =
 		}
 
 		await storage.setDisplayName(targetUserId, displayname ?? null);
+		await storage.recordProfileUpdate(
+			targetUserId,
+			"displayname",
+			displayname ?? null,
+		);
 		await propagateProfileToRooms(
 			storage,
 			serverName,
@@ -243,6 +248,11 @@ export const putAvatarUrl =
 		}
 
 		await storage.setAvatarUrl(targetUserId, avatarUrl ?? null);
+		await storage.recordProfileUpdate(
+			targetUserId,
+			"avatar_url",
+			avatarUrl ?? null,
+		);
 		await propagateProfileToRooms(
 			storage,
 			serverName,
@@ -309,6 +319,11 @@ export const putProfileField =
 					throw badJson(`Displayname exceeds ${MAX_DISPLAYNAME_BYTES} bytes`);
 			}
 			await storage.setDisplayName(targetUserId, displayname ?? null);
+			await storage.recordProfileUpdate(
+				targetUserId,
+				"displayname",
+				displayname ?? null,
+			);
 			await propagateProfileToRooms(storage, serverName, targetUserId);
 			return { status: 200, body: {} };
 		}
@@ -319,12 +334,42 @@ export const putProfileField =
 					throw badJson(`Avatar URL exceeds ${MAX_AVATAR_URL_BYTES} bytes`);
 			}
 			await storage.setAvatarUrl(targetUserId, avatarUrl ?? null);
+			await storage.recordProfileUpdate(
+				targetUserId,
+				"avatar_url",
+				avatarUrl ?? null,
+			);
 			await propagateProfileToRooms(storage, serverName, targetUserId);
 			return { status: 200, body: {} };
 		}
 
-		// Store extended profile field
+		// Store extended profile field (MSC4133) and record it for MSC4429 sync.
 		const value = body[keyName];
 		extendedProfileFields.set(profileFieldKey(targetUserId, keyName), value);
+		await storage.recordProfileUpdate(targetUserId, keyName, value);
+		return { status: 200, body: {} };
+	};
+
+/** DELETE /_matrix/client/v3/profile/:userId/:keyName — clear a profile field. */
+export const deleteProfileField =
+	(storage: Storage, serverName: string): Handler =>
+	async (req) => {
+		const targetUserId = req.params.userId as UserId;
+		const keyName = req.params.keyName as string;
+
+		if (req.userId !== targetUserId)
+			throw forbidden("Cannot delete profile fields for another user");
+
+		if (keyName === "displayname") {
+			await storage.setDisplayName(targetUserId, null);
+			await propagateProfileToRooms(storage, serverName, targetUserId);
+		} else if (keyName === "avatar_url") {
+			await storage.setAvatarUrl(targetUserId, null);
+			await propagateProfileToRooms(storage, serverName, targetUserId);
+		} else {
+			extendedProfileFields.delete(profileFieldKey(targetUserId, keyName));
+		}
+		// MSC4429: a cleared field is advertised as a null update in /sync.
+		await storage.recordProfileUpdate(targetUserId, keyName, null);
 		return { status: 200, body: {} };
 	};

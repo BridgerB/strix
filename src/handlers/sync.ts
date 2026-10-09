@@ -60,6 +60,52 @@ const buildKnockRoom = async (
 	return { knock_state: { events } };
 };
 
+/**
+ * MSC4429: build the `org.matrix.msc4429.users` section — profile-field updates
+ * for users the syncer shares a room with, limited to the opted-in `profileFields`.
+ * On an initial sync (since 0) this yields the current values of those fields;
+ * on an incremental sync only fields changed in the window (since, nextBatch].
+ * A user who left the last shared room is reported with `profile_updates: null`
+ * so the client drops their cached profile. Returns undefined when the client
+ * did not opt in or there is nothing to report.
+ */
+const buildProfileUsers = async (
+	storage: Storage,
+	userId: UserId,
+	seenUsers: Set<UserId>,
+	newlyLeftUsers: Set<UserId>,
+	since: number,
+	nextBatch: number,
+	profileFields: string[] | undefined,
+): Promise<
+	| Record<string, { profile_updates: Record<string, unknown> | null }>
+	| undefined
+> => {
+	if (!profileFields || profileFields.length === 0) return undefined;
+	const fieldSet = new Set(profileFields);
+	const updates = await storage.getProfileUpdatesSince(since, nextBatch);
+	const perUser = new Map<string, Record<string, unknown>>();
+	for (const u of updates) {
+		if (!fieldSet.has(u.field)) continue;
+		if (!seenUsers.has(u.userId as UserId)) continue;
+		const fields = perUser.get(u.userId) ?? {};
+		fields[u.field] = u.value; // later entries win; null means cleared
+		perUser.set(u.userId, fields);
+	}
+	const out: Record<
+		string,
+		{ profile_updates: Record<string, unknown> | null }
+	> = {};
+	for (const [uid, fields] of perUser) out[uid] = { profile_updates: fields };
+	// A user who left the last room we shared is advertised as null.
+	for (const u of newlyLeftUsers) {
+		if (u === userId) continue;
+		if (seenUsers.has(u)) continue;
+		out[u] = { profile_updates: null };
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+};
+
 export const DEFAULT_TIMELINE_LIMIT = 20;
 export const MAX_TIMEOUT = 30000;
 
@@ -76,6 +122,8 @@ interface ResolvedFilter {
 	unreadThreadNotifications: boolean;
 	timelineFilter?: RoomEventFilter;
 	stateFilter?: StateFilter;
+	/** MSC4429: profile fields the client opted into receiving updates for. */
+	profileFields?: string[];
 }
 
 const resolveFilter = async (
@@ -116,6 +164,9 @@ const resolveFilter = async (
 			filter.room?.timeline?.unread_thread_notifications ?? false,
 		timelineFilter: filter.room?.timeline,
 		stateFilter: filter.room?.state,
+		profileFields:
+			filter.profile_fields?.ids ??
+			filter["org.matrix.msc4429.profile_fields"]?.ids,
 	};
 };
 
@@ -1060,6 +1111,15 @@ const buildInitialSync = async (
 			toDeviceEvents.length > 0 ? { events: toDeviceEvents } : undefined,
 		device_one_time_keys_count: otkCounts,
 		device_unused_fallback_key_types: fallbackKeyTypes,
+		"org.matrix.msc4429.users": await buildProfileUsers(
+			storage,
+			userId,
+			seenUsers,
+			new Set<UserId>(),
+			0,
+			nextBatch,
+			filter.profileFields,
+		),
 	};
 };
 const buildIncrementalSync = async (
@@ -1681,6 +1741,15 @@ const buildIncrementalSync = async (
 			toDeviceEvents.length > 0 ? { events: toDeviceEvents } : undefined,
 		device_one_time_keys_count: otkCounts,
 		device_unused_fallback_key_types: fallbackKeyTypes,
+		"org.matrix.msc4429.users": await buildProfileUsers(
+			storage,
+			userId,
+			seenUsers,
+			newlyLeftUsers,
+			since,
+			nextBatch,
+			filter.profileFields,
+		),
 	};
 };
 // Whether an incremental sync response carries nothing for the client — used by
@@ -1695,7 +1764,8 @@ const isEmptySyncResponse = (r: SyncResponse): boolean =>
 	!r.device_lists?.changed?.length &&
 	!r.device_lists?.left?.length &&
 	!r.account_data?.events?.length &&
-	!r.presence?.events?.length;
+	!r.presence?.events?.length &&
+	!r["org.matrix.msc4429.users"];
 
 export const getSync =
 	(storage: Storage, _serverName: string): Handler =>

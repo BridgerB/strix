@@ -6,6 +6,10 @@ export interface SyncFilter {
 	presence?: EventFilter;
 	account_data?: EventFilter;
 	room?: RoomFilter;
+	// MSC4429: opt-in list of profile fields to receive updates for in /sync.
+	// Both the unstable-prefixed and stable keys are accepted.
+	profile_fields?: { ids?: string[] };
+	"org.matrix.msc4429.profile_fields"?: { ids?: string[] };
 }
 
 export interface RoomFilter {
