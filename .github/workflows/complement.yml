@@ -66,6 +66,7 @@ jobs:
         env:
           COMPLEMENT_BASE_IMAGE: complement-strix
           GOTOOLCHAIN: auto
+          COMPLEMENT_ALWAYS_PRINT_SERVER_LOGS: "1"
         run: |
           set -o pipefail
           ARGS=(test -json -count=1 -timeout "${{ github.event.inputs.go_timeout }}")
