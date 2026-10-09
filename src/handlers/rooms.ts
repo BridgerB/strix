@@ -36,6 +36,7 @@ import type { Handler } from "../router.ts";
 import type { SigningKey } from "../signing.ts";
 import { signEvent } from "../signing.ts";
 import type { Storage } from "../storage/interface.ts";
+import { fullInviteState } from "../storage/ephemeral.ts";
 import type { EDU, PDU } from "../types/events.ts";
 import type {
 	DeviceId,
@@ -2051,7 +2052,9 @@ const performOutboundInvite = async (
 	// Local auth check before sending — the inviter must have permission.
 	checkEventAuth(event, eventId, room);
 
-	const strippedState = await storage.getStrippedState(roomId);
+	// MSC4311: invite_room_state carries FULL events (not the stripped form) so
+	// the invitee's server can verify them; m.room.create is always included.
+	const inviteRoomState = fullInviteState(room);
 
 	const inviteResp = await federationClient.request(
 		inviteeServer,
@@ -2060,7 +2063,7 @@ const performOutboundInvite = async (
 		{
 			room_version: room.room_version,
 			event,
-			invite_room_state: strippedState,
+			invite_room_state: inviteRoomState,
 		},
 	);
 

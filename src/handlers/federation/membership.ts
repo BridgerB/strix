@@ -1,6 +1,7 @@
 import {
 	forbidden,
 	MatrixError,
+	missingParam,
 	notFound,
 	unableToAuthoriseJoin,
 } from "../../errors.ts";
@@ -10,10 +11,12 @@ import {
 	findAuthorisingLocalUser,
 	getJoinRule,
 	getMembership,
+	isRoomVersion12Plus,
 	selectAuthEvents,
 	stripV12CreateRoomId,
 	userSatisfiesRestrictedAllow,
 } from "../../events.ts";
+import { fullInviteState } from "../../storage/ephemeral.ts";
 import { isServerAllowedByAcl } from "../../federation/acl.ts";
 import type { FederationClient } from "../../federation/client.ts";
 import { fanoutEvent } from "../../federation/outbound.ts";
@@ -768,6 +771,19 @@ export const putFederationInvite =
 		const strippedState = toStrippedState(
 			body.invite_room_state ?? unsigned.invite_room_state,
 		);
+
+		// MSC4311: for v12+ rooms the invite_room_state MUST include the
+		// m.room.create event; reject the invite with 400 M_MISSING_PARAM
+		// otherwise (TestMSC4311RejectInvalidStrippedStateFederation).
+		if (
+			isRoomVersion12Plus(inviteRoomVersion) &&
+			!strippedState.some((e) => e.type === "m.room.create")
+		) {
+			throw missingParam(
+				"invite_room_state is missing the m.room.create event",
+			);
+		}
+
 		unsigned.invite_room_state = strippedState;
 		coSigned.unsigned = unsigned as PDU["unsigned"];
 
@@ -983,13 +999,14 @@ export const putSendKnock =
 			eventId,
 		);
 
-		// Reply with stripped room state so the knocking server's clients can
-		// display room metadata while the knock is pending (synapse
-		// on_send_knock_request).
-		const strippedState = await storage.getStrippedState(roomId);
+		// Reply with room state so the knocking server's clients can display room
+		// metadata while the knock is pending (synapse on_send_knock_request).
+		// MSC4311: knock_room_state carries FULL events (incl. m.room.create), not
+		// the minimal stripped form.
+		const knockRoomState = fullInviteState(room);
 
 		return {
 			status: 200,
-			body: { knock_room_state: strippedState },
+			body: { knock_room_state: knockRoomState },
 		};
 	};

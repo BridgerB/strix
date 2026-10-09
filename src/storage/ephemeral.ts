@@ -1,5 +1,5 @@
 import type { PresenceState } from "../types/ephemeral.ts";
-import type { StrippedStateEvent } from "../types/events.ts";
+import type { PDU, StrippedStateEvent } from "../types/events.ts";
 import type { RoomId, RoomState, Timestamp, UserId } from "../types/index.ts";
 import type { JsonObject } from "../types/json.ts";
 
@@ -19,16 +19,12 @@ export const eventToStrippedState = (event: {
 	state_key?: string;
 	type: string;
 }): StrippedStateEvent => {
-	// MSC4311: the m.room.create event is special-cased into stripped state in
-	// full (not reduced to the minimal 4 fields), so invitees can read the room
-	// version / creators (incl. origin_server_ts) from the invite. Mirrors
-	// synapse strip_event for msc4291 rooms.
-	if (event.type === "m.room.create" && (event.state_key ?? "") === "") {
-		return {
-			...(event as Record<string, unknown>),
-			state_key: event.state_key ?? "",
-		} as StrippedStateEvent;
-	}
+	// MSC4311: client-facing stripped state (invite_state / knock_state in /sync)
+	// uses the minimal stripped format for EVERY event, including m.room.create —
+	// no full-PDU fields such as origin_server_ts. (The federation
+	// invite_room_state / knock_room_state carry FULL events instead; see
+	// fullInviteState.) The room version / creators remain readable from the
+	// create event's content.
 	return {
 		content: event.content,
 		sender: event.sender,
@@ -36,6 +32,22 @@ export const eventToStrippedState = (event: {
 		type: event.type,
 	};
 };
+
+/**
+ * MSC4311: the state events shared with an invitee/knocker over FEDERATION
+ * (invite_room_state / knock_room_state) are FULL PDUs — not the minimal
+ * stripped form — so the receiving server sees origin_server_ts and can verify
+ * them. Selects the same state types as getStrippedState but returns the
+ * unmodified events. m.room.create is always included.
+ */
+export const fullInviteState = (room: RoomState): PDU[] =>
+	[...room.state_events.entries()]
+		.filter(([key]) =>
+			INVITE_STATE_TYPES.includes(
+				key.split("\x1f")[0] as (typeof INVITE_STATE_TYPES)[number],
+			),
+		)
+		.map(([, event]) => event);
 
 export interface EphemeralStore {
 	/** Monotonic stream position; every persisted change advances it. */
