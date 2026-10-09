@@ -281,6 +281,8 @@ export const postCreateRoom =
 			"12",
 			// MSC3757 (owned state events) unstable room version
 			"org.matrix.msc3757.10",
+			// MSC3389 (redaction preserves m.relates_to) unstable room version
+			"org.matrix.msc3389.10",
 		]);
 		if (
 			body.room_version !== undefined &&

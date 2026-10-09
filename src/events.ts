@@ -88,6 +88,8 @@ interface RedactionFlags {
 	msc4291: boolean;
 	/** v11+: room creator implied by `m.room.create.sender` (no `creator`). */
 	implicitRoomCreator: boolean;
+	/** MSC3389: redaction preserves m.relates_to (rel_type + event_id). */
+	msc3389: boolean;
 }
 
 const redactionFlagsFor = (roomVersion: string | undefined): RedactionFlags => {
@@ -100,8 +102,18 @@ const redactionFlagsFor = (roomVersion: string | undefined): RedactionFlags => {
 		restrictedJoinRuleFix: v >= 9,
 		msc4291: v >= 12,
 		implicitRoomCreator: v >= 11,
+		msc3389: isMsc3389Enabled(roomVersion),
 	};
 };
+
+/**
+ * MSC3389: redaction preserves the `m.relates_to` relationship (`rel_type` and
+ * `event_id`) so a redacted reaction/edit/thread reply still carries its link.
+ * Opt-in via the unstable room version `org.matrix.msc3389.<base version>`
+ * (the Complement test uses `org.matrix.msc3389.10`).
+ */
+const isMsc3389Enabled = (roomVersion: string | undefined): boolean =>
+	roomVersion?.startsWith("org.matrix.msc3389.") ?? false;
 
 /**
  * MSC3757 (owned state events).
@@ -305,6 +317,23 @@ export const redactEvent = (event: PDU, roomVersion?: string): PDU => {
 		case "m.room.redaction": {
 			if (flags.updatedRedactionRules) addFields("redacts");
 			break;
+		}
+	}
+
+	// MSC3389: preserve the m.relates_to relationship through redaction, reduced
+	// to rel_type + event_id (any other keys, e.g. a reaction `key`, are dropped).
+	// Applies to any event type that carries a relation (reactions, edits, thread
+	// replies).
+	if (flags.msc3389) {
+		const rel = content["m.relates_to"];
+		if (rel && typeof rel === "object" && !Array.isArray(rel)) {
+			const r = rel as Record<string, unknown>;
+			const preserved: Record<string, unknown> = {};
+			if (typeof r.rel_type === "string") preserved.rel_type = r.rel_type;
+			if (typeof r.event_id === "string") preserved.event_id = r.event_id;
+			if (Object.keys(preserved).length > 0) {
+				newContent["m.relates_to"] = preserved;
+			}
 		}
 	}
 
