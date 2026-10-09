@@ -989,6 +989,10 @@ export const putSendKnock =
 		// as-is. fanoutEvent targets only servers with a *joined* member and excludes
 		// our own server, so the knocking server (whose member is only "knock", not
 		// "join") is never echoed the event back to itself.
+		// Relay the knock to the room's other resident servers, but NOT back to the
+		// knocking server itself — it already has the event and need not (and per
+		// the engineered test server, must not) receive an echo (TestMSC4311
+		// knock_room_state).
 		await fanoutEvent(
 			storage,
 			serverName,
@@ -997,6 +1001,7 @@ export const putSendKnock =
 			roomId,
 			event,
 			eventId,
+			[origin as ServerName],
 		);
 
 		// Reply with room state so the knocking server's clients can display room

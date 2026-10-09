@@ -2144,7 +2144,13 @@ export const postKnock =
 
 		if (needsFederation) {
 			const serversToTry: string[] = [];
-			for (const s of req.query.getAll("server_name")) {
+			// Accept both the legacy `server_name` and the current `via` query
+			// params. For a v12 room the room id has no `:server` suffix, so `via`
+			// is the only routing hint the client can give (TestMSC4311 remote knock).
+			for (const s of [
+				...req.query.getAll("server_name"),
+				...req.query.getAll("via"),
+			]) {
 				if (!serversToTry.includes(s)) serversToTry.push(s);
 			}
 			if (roomServer && !serversToTry.includes(roomServer)) {
